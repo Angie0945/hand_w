@@ -1,65 +1,132 @@
 import tensorflow as tf
 from PIL import Image, ImageOps
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
+import cv2
 
-# App
-def predictDigit(image):
-    model = tf.keras.models.load_model("model/handwritten.h5")
-    image = ImageOps.grayscale(image)
-    img = image.resize((28,28))
-    img = np.array(img, dtype='float32')
-    img = img/255
-    plt.imshow(img)
-    plt.show()
-    img = img.reshape((1,28,28,1))
-    pred= model.predict(img)
-    result = np.argmax(pred[0])
-    return result
+# ---------------------------
+# CARGAR MODELO UNA VEZ
+# ---------------------------
+@st.cache_resource
+def load_model():
+    return tf.keras.models.load_model("model/handwritten.h5")
 
-# Streamlit 
-st.set_page_config(page_title='Reconocimiento de Dígitos escritos a mano', layout='wide')
-st.title('Reconocimiento de Dígitos escritos a mano')
-st.subheader("Dibuja el digito en el panel  y presiona  'Predecir'")
+model = load_model()
 
-# Add canvas component
-# Specify canvas parameters in application
-drawing_mode = "freedraw"
-stroke_width = st.slider('Selecciona el ancho de línea', 1, 30, 15)
-stroke_color = '#FFFFFF' # Set background color to white
-bg_color = '#000000'
+# ---------------------------
+# PREPROCESAMIENTO
+# ---------------------------
+def preprocess(img):
+    img = ImageOps.grayscale(img)
+    img = np.array(img)
 
-# Create a canvas component
+    # Invertir colores
+    img = cv2.bitwise_not(img)
+
+    # Blur para suavizar
+    img = cv2.GaussianBlur(img, (5,5), 0)
+
+    # Threshold
+    _, thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    return thresh
+
+# ---------------------------
+# SEGMENTACIÓN AVANZADA (CLAVE)
+# ---------------------------
+def segment_digits_advanced(img):
+    # Proyección vertical
+    projection = np.sum(img, axis=0)
+
+    segments = []
+    start = None
+
+    for i, val in enumerate(projection):
+        if val > 0 and start is None:
+            start = i
+        elif val == 0 and start is not None:
+            segments.append((start, i))
+            start = None
+
+    if start is not None:
+        segments.append((start, len(projection)))
+
+    digits = []
+
+    for (x1, x2) in segments:
+        digit = img[:, x1:x2]
+
+        # Filtrar ruido
+        if digit.shape[1] > 5:
+            digits.append(digit)
+
+    return digits
+
+# ---------------------------
+# PREDECIR
+# ---------------------------
+def predict_digit(digit_img):
+    digit_img = cv2.resize(digit_img, (28, 28))
+    digit_img = digit_img / 255.0
+    digit_img = digit_img.reshape(1, 28, 28, 1)
+
+    pred = model.predict(digit_img, verbose=0)
+    return np.argmax(pred)
+
+# ---------------------------
+# UI
+# ---------------------------
+st.set_page_config(page_title="Reconocimiento PRO", layout="centered")
+
+st.markdown("## 🔢 Reconocimiento de números pegados")
+st.write("Dibuja números juntos (ej: 123, 456) ✍️")
+
+stroke_width = st.slider("✏️ Grosor", 1, 30, 15)
+
 canvas_result = st_canvas(
-    fill_color="rgba(255, 165, 0, 0.3)",  # Fixed fill color with some opacity
     stroke_width=stroke_width,
-    stroke_color=stroke_color,
-    background_color=bg_color,
+    stroke_color="#FFFFFF",
+    background_color="#000000",
     height=200,
-    width=200,
+    width=400,
     key="canvas",
 )
 
-# Add "Predict Now" button
-if st.button('Predecir'):
+if st.button("🚀 Predecir número"):
     if canvas_result.image_data is not None:
-        input_numpy_array = np.array(canvas_result.image_data)
-        input_image = Image.fromarray(input_numpy_array.astype('uint8'),'RGBA')
-        input_image.save('prediction/img.png')
-        img = Image.open("prediction/img.png")
-        res = predictDigit(img)
-        st.header('El Digito es : ' + str(res))
-    else:
-        st.header('Por favor dibuja en el canvas el digito.')
 
-# Add sidebar
-st.sidebar.title("Acerca de:")
-st.sidebar.text("En esta aplicación se evalua ")
-st.sidebar.text("la capacidad de un RNA de reconocer") 
-st.sidebar.text("digitos escritos a mano.")
-st.sidebar.text("Basado en desarrollo de Vinay Uniyal")
-#st.sidebar.text("GitHub Repository")
-#st.sidebar.write("[GitHub Repo Link](https://github.com/Vinay2022/Handwritten-Digit-Recognition)")
+        img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
+
+        processed = preprocess(img)
+
+        digits = segment_digits_advanced(processed)
+
+        if len(digits) == 0:
+            st.warning("No se detectó nada 😅")
+        else:
+            result = ""
+
+            for d in digits:
+                pred = predict_digit(d)
+                result += str(pred)
+
+            st.success(f"🔢 Resultado: {result}")
+
+            # Mostrar debug visual
+            st.markdown("### 🧩 Segmentación detectada")
+            cols = st.columns(len(digits))
+            for i, d in enumerate(digits):
+                cols[i].image(d, width=80)
+
+    else:
+        st.warning("Dibuja algo primero ✍️")
+
+# Sidebar
+st.sidebar.title("💡 Tips")
+st.sidebar.write("""
+✔ Funciona con números pegados  
+✔ Mejor si no los haces MUY juntos  
+✔ Usa trazos gruesos  
+✔ Evita superponerlos completamente  
+""")
