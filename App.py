@@ -4,121 +4,122 @@ import numpy as np
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 
-# ---------------------------
-# CONFIG
-# ---------------------------
-st.set_page_config(page_title="Reconocimiento de Dígitos", layout="centered")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title='Reconocimiento de Números', layout='centered')
 
-# ---------------------------
-# ESTILO (CLAVE PARA ICONOS)
-# ---------------------------
+# ---------------- ESTILO ----------------
 st.markdown("""
 <style>
-/* Fondo general */
-body {
-    background-color: #F5F7FB;
+.stApp {
+    background-color: #E6D9FF;  /* lila suave */
 }
 
-/* Título */
 .big-title {
-    font-size: 36px;
     text-align: center;
+    font-size: 40px;
     font-weight: bold;
 }
 
-/* Botones principales */
-.stButton>button {
-    background-color: #6C63FF;
-    color: white;
-    border-radius: 10px;
-    padding: 10px;
-    font-weight: bold;
-}
-
-/* 👇 ESTO ARREGLA LOS ICONOS DEL CANVAS */
-button[kind="secondary"] {
-    background-color: #FFFFFF !important;
-    color: #000000 !important;
-    border: 1px solid #ccc !important;
+.subtitle {
+    text-align: center;
+    color: #555;
 }
 
 canvas {
-    border: 2px solid #ddd;
-    border-radius: 10px;
+    border-radius: 15px;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------
-# UI
-# ---------------------------
-st.markdown('<p class="big-title">🔢 Reconocimiento de Dígitos</p>', unsafe_allow_html=True)
-st.write("Dibuja un número ✍️ y presiona **Predecir**")
+# ---------------- HEADER ----------------
+st.markdown('<p class="big-title">🔢 Reconocimiento de Números</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Dibuja números (pueden estar juntos)</p>', unsafe_allow_html=True)
 
-# ---------------------------
-# MODELO
-# ---------------------------
+# ---------------- CARGAR MODELO ----------------
 @st.cache_resource
 def load_model():
     return tf.keras.models.load_model("model/handwritten.h5")
 
 model = load_model()
 
-# ---------------------------
-# PREPROCESAMIENTO
-# ---------------------------
-def preprocess(image):
-    image = ImageOps.grayscale(image)
-    image = ImageOps.invert(image)  # importante
-    image = image.resize((28, 28))
-
-    img = np.array(image) / 255.0
+# ---------------- FUNCIÓN PREDICCIÓN ----------------
+def predict_digit(img):
+    img = img.resize((28, 28))
+    img = ImageOps.grayscale(img)
+    img = np.array(img).astype("float32") / 255.0
     img = img.reshape(1, 28, 28, 1)
 
-    return img
+    pred = model.predict(img, verbose=0)
+    return np.argmax(pred)
 
-# ---------------------------
-# CANVAS (SIN BOTÓN LIMPIAR)
-# ---------------------------
-stroke_width = st.slider("✏️ Grosor del trazo", 5, 25, 15)
+# ---------------- SEGMENTAR VARIOS DÍGITOS ----------------
+def segment_digits(image):
+    img = ImageOps.grayscale(image)
+    img = np.array(img)
 
-canvas_result = st_canvas(
-    stroke_width=stroke_width,
-    stroke_color="#000000",
-    background_color="#FFFFFF",
-    height=250,
-    width=250,
-    drawing_mode="freedraw",
-    key="canvas",
-)
+    # binarizar
+    img = (img > 50).astype(np.uint8) * 255
 
-# ---------------------------
-# BOTÓN PREDICT
-# ---------------------------
-if st.button("🔍 Predecir"):
+    # sumar columnas
+    col_sum = np.sum(img, axis=0)
+
+    digits = []
+    start = None
+
+    for i, val in enumerate(col_sum):
+        if val > 0 and start is None:
+            start = i
+        elif val == 0 and start is not None:
+            if i - start > 5:
+                digit = img[:, start:i]
+                digits.append(digit)
+            start = None
+
+    return digits
+
+# ---------------- CANVAS CENTRADO ----------------
+col1, col2, col3 = st.columns([1,2,1])
+
+with col2:
+    stroke_width = st.slider('🖊️ Grosor', 5, 40, 20)
+
+    canvas_result = st_canvas(
+        stroke_width=stroke_width,
+        stroke_color="#000000",
+        background_color="#FFFFFF",
+        height=300,
+        width=300,
+        drawing_mode="freedraw",
+        key="canvas",
+    )
+
+# ---------------- PREDICCIÓN ----------------
+st.markdown("###")
+
+if st.button("✨ Predecir número"):
+
     if canvas_result.image_data is not None:
 
         img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
+        img = img.convert("RGB")
 
-        processed = preprocess(img)
+        digits = segment_digits(img)
 
-        prediction = model.predict(processed)
-        digit = np.argmax(prediction)
-        confidence = np.max(prediction)
+        if len(digits) == 0:
+            st.warning("⚠️ No se detectaron números")
+        else:
+            result = ""
 
-        st.success(f"🎯 Resultado: **{digit}**")
-        st.write(f"Confianza: {confidence:.2f}")
+            for d in digits:
+                pil_img = Image.fromarray(d)
+                num = predict_digit(pil_img)
+                result += str(num)
+
+            st.success(f"🔢 Número detectado: {result}")
 
     else:
-        st.warning("Dibuja un número primero ✍️")
+        st.warning("⚠️ Dibuja algo primero")
 
-# ---------------------------
-# SIDEBAR
-# ---------------------------
-st.sidebar.title("💡 Tips")
-st.sidebar.write("""
-✔ Usa los botones debajo del canvas  
-✔ (deshacer, borrar, etc.)  
-✔ Dibuja centrado  
-✔ Evita trazos muy finos  
-""")
+# ---------------- INFO ----------------
+st.markdown("---")
+st.caption("💜 Dibuja números claros. Puedes escribir varios juntos.")
