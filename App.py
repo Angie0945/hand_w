@@ -5,20 +5,28 @@ import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 
 # ---------------------------
-# CONFIG UI BONITA
+# CONFIG
 # ---------------------------
 st.set_page_config(page_title="Reconocimiento de Dígitos", layout="centered")
 
+# ---------------------------
+# ESTILO (CLAVE PARA ICONOS)
+# ---------------------------
 st.markdown("""
 <style>
+/* Fondo general */
 body {
     background-color: #F5F7FB;
 }
+
+/* Título */
 .big-title {
     font-size: 36px;
     text-align: center;
     font-weight: bold;
 }
+
+/* Botones principales */
 .stButton>button {
     background-color: #6C63FF;
     color: white;
@@ -26,14 +34,29 @@ body {
     padding: 10px;
     font-weight: bold;
 }
+
+/* 👇 ESTO ARREGLA LOS ICONOS DEL CANVAS */
+button[kind="secondary"] {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+    border: 1px solid #ccc !important;
+}
+
+canvas {
+    border: 2px solid #ddd;
+    border-radius: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------
+# UI
+# ---------------------------
 st.markdown('<p class="big-title">🔢 Reconocimiento de Dígitos</p>', unsafe_allow_html=True)
 st.write("Dibuja un número ✍️ y presiona **Predecir**")
 
 # ---------------------------
-# CARGAR MODELO
+# MODELO
 # ---------------------------
 @st.cache_resource
 def load_model():
@@ -42,59 +65,37 @@ def load_model():
 model = load_model()
 
 # ---------------------------
-# PREPROCESAMIENTO CORRECTO
+# PREPROCESAMIENTO
 # ---------------------------
 def preprocess(image):
     image = ImageOps.grayscale(image)
-
-    # Invertir colores (fondo negro → blanco)
-    image = ImageOps.invert(image)
-
-    # Redimensionar
+    image = ImageOps.invert(image)  # importante
     image = image.resize((28, 28))
 
-    img = np.array(image)
-
-    # Normalizar
-    img = img / 255.0
-
-    # Ajustar forma
+    img = np.array(image) / 255.0
     img = img.reshape(1, 28, 28, 1)
 
     return img
 
 # ---------------------------
-# CANVAS (MEJOR VISUAL)
+# CANVAS (SIN BOTÓN LIMPIAR)
 # ---------------------------
 stroke_width = st.slider("✏️ Grosor del trazo", 5, 25, 15)
 
 canvas_result = st_canvas(
     stroke_width=stroke_width,
-    stroke_color="#000000",   # negro
-    background_color="#FFFFFF",  # fondo blanco (MEJOR)
+    stroke_color="#000000",
+    background_color="#FFFFFF",
     height=250,
     width=250,
+    drawing_mode="freedraw",
     key="canvas",
 )
 
 # ---------------------------
-# BOTONES BONITOS
+# BOTÓN PREDICT
 # ---------------------------
-col1, col2 = st.columns(2)
-
-with col1:
-    predict_btn = st.button("🔍 Predecir")
-
-with col2:
-    clear_btn = st.button("🧹 Limpiar")
-
-if clear_btn:
-    st.rerun()
-
-# ---------------------------
-# PREDICCIÓN
-# ---------------------------
-if predict_btn:
+if st.button("🔍 Predecir"):
     if canvas_result.image_data is not None:
 
         img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
@@ -103,7 +104,6 @@ if predict_btn:
 
         prediction = model.predict(processed)
         digit = np.argmax(prediction)
-
         confidence = np.max(prediction)
 
         st.success(f"🎯 Resultado: **{digit}**")
@@ -113,12 +113,12 @@ if predict_btn:
         st.warning("Dibuja un número primero ✍️")
 
 # ---------------------------
-# SIDEBAR LIMPIO
+# SIDEBAR
 # ---------------------------
-st.sidebar.title("ℹ️ Tips")
+st.sidebar.title("💡 Tips")
 st.sidebar.write("""
-✔ Dibuja un solo número  
-✔ Hazlo grande y centrado  
+✔ Usa los botones debajo del canvas  
+✔ (deshacer, borrar, etc.)  
+✔ Dibuja centrado  
 ✔ Evita trazos muy finos  
-✔ No lo pegues a los bordes  
 """)
