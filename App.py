@@ -3,9 +3,38 @@ from PIL import Image, ImageOps
 import numpy as np
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
-import cv2
 
-# Cargar modelo UNA SOLA VEZ (más rápido)
+# ---------------------------
+# CONFIG UI BONITA
+# ---------------------------
+st.set_page_config(page_title="Reconocimiento de Dígitos", layout="centered")
+
+st.markdown("""
+<style>
+body {
+    background-color: #F5F7FB;
+}
+.big-title {
+    font-size: 36px;
+    text-align: center;
+    font-weight: bold;
+}
+.stButton>button {
+    background-color: #6C63FF;
+    color: white;
+    border-radius: 10px;
+    padding: 10px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<p class="big-title">🔢 Reconocimiento de Dígitos</p>', unsafe_allow_html=True)
+st.write("Dibuja un número ✍️ y presiona **Predecir**")
+
+# ---------------------------
+# CARGAR MODELO
+# ---------------------------
 @st.cache_resource
 def load_model():
     return tf.keras.models.load_model("model/handwritten.h5")
@@ -13,108 +42,83 @@ def load_model():
 model = load_model()
 
 # ---------------------------
-# PREPROCESAMIENTO DE IMAGEN
+# PREPROCESAMIENTO CORRECTO
 # ---------------------------
-def preprocess(img):
-    img = ImageOps.grayscale(img)
-    img = np.array(img)
+def preprocess(image):
+    image = ImageOps.grayscale(image)
 
-    # Invertir (negro fondo, blanco dígito)
-    img = cv2.bitwise_not(img)
+    # Invertir colores (fondo negro → blanco)
+    image = ImageOps.invert(image)
 
-    # Umbral para separar dígitos
-    _, thresh = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+    # Redimensionar
+    image = image.resize((28, 28))
 
-    return thresh
+    img = np.array(image)
 
+    # Normalizar
+    img = img / 255.0
 
-# ---------------------------
-# SEGMENTAR DÍGITOS
-# ---------------------------
-def segment_digits(img):
-    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Ajustar forma
+    img = img.reshape(1, 28, 28, 1)
 
-    digits = []
-
-    # Ordenar de izquierda a derecha
-    contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])
-
-    for c in contours:
-        x, y, w, h = cv2.boundingRect(c)
-
-        # Filtrar ruido pequeño
-        if w > 10 and h > 10:
-            digit = img[y:y+h, x:x+w]
-            digits.append(digit)
-
-    return digits
-
+    return img
 
 # ---------------------------
-# PREDECIR CADA DÍGITO
+# CANVAS (MEJOR VISUAL)
 # ---------------------------
-def predict_digit(digit_img):
-    digit_img = cv2.resize(digit_img, (28, 28))
-    digit_img = digit_img / 255.0
-    digit_img = digit_img.reshape(1, 28, 28, 1)
-
-    pred = model.predict(digit_img)
-    return np.argmax(pred)
-
-
-# ---------------------------
-# STREAMLIT UI
-# ---------------------------
-st.set_page_config(page_title="Reconocimiento múltiple", layout="centered")
-
-st.title("🔢 Reconocimiento de hasta 3 dígitos")
-st.markdown("Dibuja **1, 2 o 3 números juntos** ✍️")
-
-stroke_width = st.slider("Grosor del trazo", 1, 30, 15)
+stroke_width = st.slider("✏️ Grosor del trazo", 5, 25, 15)
 
 canvas_result = st_canvas(
     stroke_width=stroke_width,
-    stroke_color="#FFFFFF",
-    background_color="#000000",
-    height=200,
-    width=400,   # MÁS ANCHO para varios dígitos
+    stroke_color="#000000",   # negro
+    background_color="#FFFFFF",  # fondo blanco (MEJOR)
+    height=250,
+    width=250,
     key="canvas",
 )
 
-if st.button("✨ Predecir número"):
+# ---------------------------
+# BOTONES BONITOS
+# ---------------------------
+col1, col2 = st.columns(2)
+
+with col1:
+    predict_btn = st.button("🔍 Predecir")
+
+with col2:
+    clear_btn = st.button("🧹 Limpiar")
+
+if clear_btn:
+    st.rerun()
+
+# ---------------------------
+# PREDICCIÓN
+# ---------------------------
+if predict_btn:
     if canvas_result.image_data is not None:
 
         img = Image.fromarray(canvas_result.image_data.astype('uint8'), 'RGBA')
 
-        # Procesar imagen
         processed = preprocess(img)
 
-        # Segmentar
-        digits = segment_digits(processed)
+        prediction = model.predict(processed)
+        digit = np.argmax(prediction)
 
-        if len(digits) == 0:
-            st.warning("No se detectaron números 😅")
-        else:
-            result = ""
+        confidence = np.max(prediction)
 
-            for d in digits[:3]:  # máximo 3
-                pred = predict_digit(d)
-                result += str(pred)
-
-            st.success(f"🔢 Número detectado: {result}")
-
-            # Mostrar cada dígito detectado
-            cols = st.columns(len(digits[:3]))
-            for i, d in enumerate(digits[:3]):
-                cols[i].image(d, caption=f"Dígito {i+1}", width=80)
+        st.success(f"🎯 Resultado: **{digit}**")
+        st.write(f"Confianza: {confidence:.2f}")
 
     else:
-        st.warning("Dibuja algo primero ✍️")
+        st.warning("Dibuja un número primero ✍️")
 
-# Sidebar
-st.sidebar.title("ℹ️ Info")
+# ---------------------------
+# SIDEBAR LIMPIO
+# ---------------------------
+st.sidebar.title("ℹ️ Tips")
 st.sidebar.write("""
-✔ Puedes escribir hasta **3 dígitos seguidos**  
-✔ Ej: 123, 45, 789  
-✔ Trata de separarlos un poco  
+✔ Dibuja un solo número  
+✔ Hazlo grande y centrado  
+✔ Evita trazos muy finos  
+✔ No lo pegues a los bordes  
 """)
